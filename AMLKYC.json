@@ -1,0 +1,509 @@
+{
+  "name": "AMLKYC",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aml-screening",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "328963f0-09f6-4305-be7d-70bfe6207d8b",
+      "name": "Webhook — Receive PAC008 Transaction",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -1152,
+        48
+      ],
+      "webhookId": "187f4fd8-6b92-4d11-9e36-b65b139aff7d",
+      "notes": "Entry point. Receives PAC008 payment transaction as JSON POST body."
+    },
+    {
+      "parameters": {
+        "jsCode": "const txn = $input.first().json.body || $input.first().json;\n\nconst watchlist = [\n  {\n    account_number: \"DE89370400440532013000\",\n    entity_name: \"XYZ Trading FZE\",\n    list_type: \"OFAC_SDN\",\n    risk_level: \"HIGH\",\n    match_reason: \"OFAC Specially Designated Nationals list — UAE entity\"\n  },\n  {\n    account_number: \"FR7630006000011234567890189\",\n    entity_name: \"ABC Shell Corp\",\n    list_type: \"UN_SANCTIONS\",\n    risk_level: \"HIGH\",\n    match_reason: \"UN Security Council sanctions list\"\n  },\n  {\n    account_number: \"RU123456789012345\",\n    entity_name: \"Ivan Petrov Holdings\",\n    list_type: \"HMT_SANCTIONS\",\n    risk_level: \"HIGH\",\n    match_reason: \"UK HM Treasury sanctions — Russian entity\"\n  },\n  {\n    account_number: \"IR987654321098765\",\n    entity_name: \"Tehran Import Export\",\n    list_type: \"OFAC_IRAN\",\n    risk_level: \"HIGH\",\n    match_reason: \"OFAC Iran sanctions programme\"\n  },\n  {\n    account_number: \"GB12FAKE12345678901234\",\n    entity_name: \"Fraud Merchant Ltd\",\n    list_type: \"INTERNAL_FRAUD\",\n    risk_level: \"MEDIUM\",\n    match_reason: \"Internal fraud watchlist — previous chargeback history\"\n  }\n];\n\n// ✅ Fix operators too (remove HTML encoding)\nconst hits = watchlist.filter(w =>\n  w.account_number === txn.sender_account ||\n  w.account_number === txn.beneficiary_account ||\n  (txn.beneficiary_name && txn.beneficiary_name.toLowerCase().includes(w.entity_name.toLowerCase())) ||\n  (txn.sender_name && txn.sender_name.toLowerCase().includes(w.entity_name.toLowerCase()))\n);\n\n// ✅ FINAL OUTPUT — include everything\nreturn [{\n  json: {\n    txn_data: txn,\n    watchlist_hits: hits.length > 0 ? hits : [],\n    db_hit: hits.length > 0,\n    screening_timestamp: new Date().toISOString()\n  }\n}];\n"
+      },
+      "id": "7bdd94fc-92de-4ad4-809f-7d00ced0c7a2",
+      "name": "Mock DB — Sanctions Watchlist Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        48
+      ],
+      "notes": "Simulates sanctions_watchlist DB table. No real DB needed. Add real entries to watchlist array to test different scenarios."
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "0b1c6bc5-f424-4e07-9b86-bc046cca8854",
+      "name": "Set — Prepare AI Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [
+        -672,
+        48
+      ],
+      "notes": "Combines PAC008 transaction data with DB watchlist results into one payload for AI Agent."
+    },
+    {
+      "parameters": {
+        "text": "=You are a senior AML Compliance Officer at a bank.\n\nAnalyze the following PAC008 payment transaction and database watchlist screening result.\n\nPAC008 TRANSACTION:\n{{ JSON.stringify($json.txn_data, null, 2) }}\n\nDATABASE WATCHLIST RESULT:\n{{ JSON.stringify($json.watchlist_hits, null, 2) }}\n\nDB HIT FLAG: {{ $json.db_hit }}\n\nScreening Timestamp: {{ $json.screening_timestamp }}\n\nBased on AML rules, sanctions screening, and fraud indicators, return ONLY a JSON object:\n{\n  \"hit\": true or false,\n  \"risk_level\": \"HIGH\" or \"MEDIUM\" or \"LOW\",\n  \"reason\": \"Clear explanation of decision\",\n  \"action\": \"BLOCK\" or \"PROCESS\" or \"MANUAL_REVIEW\",\n  \"txn_ref\": \"txn_ref from input\",\n  \"status\": \"PENDING\" or \"PASSED\" or \"REJECTED\",\n  \"screened_by\": \"AI_COMPLIANCE_AGENT\",\n  \"aml_flags\": [\"list of specific flags found\"],\n  \"recommendation\": \"Next step for compliance team\"\n}\n\nReturn ONLY the JSON. No text before or after.",
+        "options": {
+          "systemMessage": "You are a senior AML Compliance Officer. You screen payment transactions for fraud, money laundering, and sanctions violations. You always return structured JSON only — never plain text. You are thorough, accurate, and follow FATF, OFAC, and PSD2 compliance guidelines."
+        }
+      },
+      "id": "7ca82372-b975-4611-a7a5-93e53df780f1",
+      "name": "AI Agent — AML Compliance Screener",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1,
+      "position": [
+        -432,
+        48
+      ],
+      "notes": "Core AI compliance decision engine. Connect your Groq or OpenAI credential here."
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "c20ac9d1-91e6-45a5-8804-b1bdbf63df34",
+      "name": "Groq — llama3-8b",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -432,
+        256
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "jjHDbcusB7adc5FI",
+          "name": "Groq account"
+        }
+      },
+      "notes": "LLM model. Replace with OpenAI node if preferred."
+    },
+    {
+      "parameters": {
+        "sessionKey": "aml_compliance_session",
+        "contextWindowLength": 10
+      },
+      "id": "ec7eaaf3-7415-43df-8a9d-173ff0c4f51a",
+      "name": "Memory — Window Buffer",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1,
+      "position": [
+        -272,
+        256
+      ],
+      "notes": "Stores last 10 transaction decisions for AI context."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI agent response\nconst rawOutput = $input.first().json.output || $input.first().json.text || '{}';\n\nlet aiDecision;\ntry {\n  // Strip markdown code fences if present\n  const cleaned = rawOutput.replace(/```json|```/g, '').trim();\n  aiDecision = JSON.parse(cleaned);\n} catch(e) {\n  // Fallback if parsing fails\n  aiDecision = {\n    hit: true,\n    risk_level: 'HIGH',\n    reason: 'AI response parse error — defaulting to manual review',\n    action: 'MANUAL_REVIEW',\n    txn_ref: 'UNKNOWN',\n    status: 'PENDING',\n    screened_by: 'AI_COMPLIANCE_AGENT',\n    aml_flags: ['PARSE_ERROR'],\n    recommendation: 'Manual review required'\n  };\n}\n\n// Add metadata\naiDecision.processed_at = new Date().toISOString();\naiDecision.workflow = 'AML_COMPLIANCE_SCREENING';\n\nreturn [{ json: aiDecision }];"
+      },
+      "id": "880120c6-782a-4e92-8bb3-1e2d46c247ae",
+      "name": "Code — Parse AI Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        48
+      ],
+      "notes": "Parses and cleans AI agent JSON response. Handles errors gracefully."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-hit",
+              "leftValue": "={{ $json.hit }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3eef7eb7-7406-4baa-a5e1-fbcdf34f074a",
+      "name": "IF — HIT or NO HIT",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        64,
+        48
+      ],
+      "notes": "Routes transaction: TRUE = fraud hit (block), FALSE = clear (process)"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "06dd5dd3-583c-41b1-aaa5-0e68b28bd170",
+      "name": "Set — BLOCK Transaction",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [
+        304,
+        -96
+      ],
+      "notes": "HIT path: Sets transaction to PENDING, moves to repair/manual review queue."
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "7f613619-e1a7-414e-bbc9-a6cfc03658fa",
+      "name": "Set — PROCESS Transaction",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [
+        304,
+        192
+      ],
+      "notes": "NO HIT path: Transaction cleared. Status PASSED with TXN REF captured."
+    },
+    {
+      "parameters": {
+        "jsCode": "// =============================================\n// MOCK DB UPDATE — Simulates writing back to DB\n// In production: replace with real PostgreSQL node\n// =============================================\n\nconst item = $input.first().json;\n\n// Simulate DB update log\nconst dbUpdateLog = {\n  table: 'payment_transactions',\n  operation: 'UPDATE',\n  txn_ref: item.txn_ref,\n  fields_updated: {\n    status: item.final_status,\n    aml_action: item.final_action,\n    aml_reason: item.reason,\n    risk_level: item.risk_level,\n    requires_manual_review: item.requires_manual_review,\n    screened_at: item.decision_timestamp,\n    screened_by: 'AI_COMPLIANCE_AGENT'\n  },\n  db_response: 'MOCK_SUCCESS',\n  rows_affected: 1,\n  timestamp: new Date().toISOString()\n};\n\nconsole.log('Mock DB Update:', JSON.stringify(dbUpdateLog, null, 2));\n\n// Pass through all fields + db log\nreturn [{ json: { ...item, db_update_log: dbUpdateLog } }];\n"
+      },
+      "id": "a52bcd07-0e07-4964-8a6e-be49b81ce047",
+      "name": "Mock DB — Update Transaction Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        48
+      ],
+      "notes": "Simulates UPDATE to payment_transactions table. Logs what would be written. Replace with real PostgreSQL node when DB is available."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Excel row for compliance report\nconst item = $input.first().json;\n\nconst row = {\n  TXN_REF: item.txn_ref || 'N/A',\n  STATUS: item.final_status || 'UNKNOWN',\n  RISK_LEVEL: item.risk_level || 'N/A',\n  ACTION: item.final_action || 'N/A',\n  REASON: item.reason || 'N/A',\n  AML_FLAGS: Array.isArray(item.aml_flags) ? item.aml_flags.join(', ') : 'NONE',\n  REQUIRES_MANUAL_REVIEW: item.requires_manual_review ? 'YES' : 'NO',\n  QUEUE: item.queue || 'N/A',\n  SCREENED_BY: 'AI_COMPLIANCE_AGENT',\n  DECISION_TIMESTAMP: item.decision_timestamp || new Date().toISOString(),\n  REPORT_GENERATED: new Date().toISOString()\n};\n\nreturn [{ json: row }];"
+      },
+      "id": "72394f3e-ecc5-4b91-ae26-d7fcfcc47e8a",
+      "name": "Code — Prepare Excel Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        48
+      ],
+      "notes": "Formats compliance report row with all required fields for Excel export."
+    },
+    {
+      "parameters": {
+        "operation": "toFile",
+        "fileFormat": "xlsx",
+        "options": {}
+      },
+      "id": "b541b9aa-ec4d-41ef-9774-9792a5f93d2e",
+      "name": "Excel — Append to Compliance Report",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        48
+      ],
+      "notes": "Appends compliance decision row to Excel report. Update filePath to your server path."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-alert",
+              "leftValue": "={{ $json.REQUIRES_MANUAL_REVIEW }}",
+              "rightValue": "YES",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5b29649e-73f1-47cd-ae7a-6b018bf827e9",
+      "name": "IF — Send Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        48
+      ],
+      "notes": "Only sends email alert if transaction was flagged (HIT = true or MANUAL_REVIEW)."
+    },
+    {
+      "parameters": {
+        "sendTo": "compliance@yourbank.com",
+        "subject": "=🚨 AML HIT — Transaction {{ $json.TXN_REF }} Flagged | Risk: {{ $json.RISK_LEVEL }}",
+        "message": "=<h2>🚨 AML Compliance Alert</h2>\n<p><strong>Transaction Reference:</strong> {{ $json.TXN_REF }}</p>\n<p><strong>Status:</strong> {{ $json.STATUS }}</p>\n<p><strong>Risk Level:</strong> {{ $json.RISK_LEVEL }}</p>\n<p><strong>Action Taken:</strong> {{ $json.ACTION }}</p>\n<p><strong>AI Reason:</strong> {{ $json.REASON }}</p>\n<p><strong>AML Flags:</strong> {{ $json.AML_FLAGS }}</p>\n<p><strong>Queue:</strong> {{ $json.QUEUE }}</p>\n<p><strong>Screened By:</strong> {{ $json.SCREENED_BY }}</p>\n<p><strong>Decision Time:</strong> {{ $json.DECISION_TIMESTAMP }}</p>\n<hr/>\n<p><em>This alert was generated automatically by the AML Compliance AI Screening Workflow.</em></p>\n<p><em>Please review and take appropriate action in the compliance portal.</em></p>",
+        "options": {}
+      },
+      "id": "27d71348-e245-403d-b641-b90f8dd4252d",
+      "name": "Email — Alert Compliance Team",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        -80
+      ],
+      "webhookId": "c31d836c-69ef-43f8-a5b0-c14d9638ae4b",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "cDaEEz5R2Q82bWmY",
+          "name": "Gmail OAuth2 API"
+        }
+      },
+      "notes": "Sends HTML email alert to compliance team. Replace email address. Swap Gmail for SMTP if needed."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, txn_ref: $('Code — Parse AI Decision').item.json.txn_ref, status: $('Code — Parse AI Decision').item.json.status, action: $('Code — Parse AI Decision').item.json.action, risk_level: $('Code — Parse AI Decision').item.json.risk_level, screened_by: 'AI_COMPLIANCE_AGENT', timestamp: $('Code — Parse AI Decision').item.json.processed_at }) }}",
+        "options": {}
+      },
+      "id": "9ec4557a-69c0-48fb-bd99-a8078cc2c205",
+      "name": "Respond — Return Screening Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        160
+      ],
+      "notes": "Returns final JSON response to the caller with screening decision."
+    }
+  ],
+  "pinData": {
+    "Webhook — Receive PAC008 Transaction": [
+      {
+        "json": {
+          "txn_ref": "PAC008-TEST-001",
+          "sender_account": "GB29NWBK60161331926819",
+          "beneficiary_account": "DE89370400440532013000",
+          "beneficiary_name": "XYZ Trading FZE",
+          "amount": 95000,
+          "currency": "GBP",
+          "destination_country": "AE"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Set — Prepare AI Context": {
+      "main": [
+        [
+          {
+            "node": "AI Agent — AML Compliance Screener",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent — AML Compliance Screener": {
+      "main": [
+        [
+          {
+            "node": "Code — Parse AI Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq — llama3-8b": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent — AML Compliance Screener",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory — Window Buffer": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent — AML Compliance Screener",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code — Parse AI Decision": {
+      "main": [
+        [
+          {
+            "node": "IF — HIT or NO HIT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF — HIT or NO HIT": {
+      "main": [
+        [
+          {
+            "node": "Set — BLOCK Transaction",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set — PROCESS Transaction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code — Prepare Excel Row": {
+      "main": [
+        [
+          {
+            "node": "Excel — Append to Compliance Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Excel — Append to Compliance Report": {
+      "main": [
+        [
+          {
+            "node": "IF — Send Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF — Send Alert?": {
+      "main": [
+        [
+          {
+            "node": "Email — Alert Compliance Team",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond — Return Screening Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email — Alert Compliance Team": {
+      "main": [
+        [
+          {
+            "node": "Respond — Return Screening Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook — Receive PAC008 Transaction": {
+      "main": [
+        [
+          {
+            "node": "Mock DB — Sanctions Watchlist Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock DB — Sanctions Watchlist Check": {
+      "main": [
+        [
+          {
+            "node": "Set — Prepare AI Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set — BLOCK Transaction": {
+      "main": [
+        [
+          {
+            "node": "Mock DB — Update Transaction Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set — PROCESS Transaction": {
+      "main": [
+        [
+          {
+            "node": "Mock DB — Update Transaction Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock DB — Update Transaction Status": {
+      "main": [
+        [
+          {
+            "node": "Code — Prepare Excel Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "2206cb93-f00e-4d3f-b065-e279f215d645",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e0c36ece2f8eabab1097e987e8bac3319ce99dafa835324685e5fc05a5369979"
+  },
+  "nodeGroups": [],
+  "id": "YMF5Mbo1R8ZEgTIE",
+  "tags": []
+}
